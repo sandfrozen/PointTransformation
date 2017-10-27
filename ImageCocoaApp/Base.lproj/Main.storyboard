@@ -787,7 +787,7 @@
                                     <font key="font" metaFont="systemBold" size="12"/>
                                 </buttonCell>
                                 <connections>
-                                    <action selector="openImageAction:" target="XfG-lQ-9wD" id="SdA-Gg-8S6"/>
+                                    <action selector="doOperationAction:" target="XfG-lQ-9wD" id="N0Z-hA-sKz"/>
                                 </connections>
                             </button>
                             <slider verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="jtv-nB-u3G">
@@ -840,8 +840,14 @@
                         </constraints>
                     </view>
                     <connections>
+                        <outlet property="alpCheckBox" destination="wIx-6R-c5a" id="Otj-uc-Ngj"/>
+                        <outlet property="bluCheckBox" destination="rpa-SY-u9l" id="YcY-uV-ydS"/>
+                        <outlet property="grnCheckBox" destination="wJt-1u-nNW" id="GCU-nt-ukT"/>
+                        <outlet property="ikImageView" destination="8wH-qe-dgQ" id="Kvc-oe-g2o"/>
                         <outlet property="imagePathLabel" destination="bSn-Gn-GFB" id="YnJ-hU-eKP"/>
-                        <outlet property="imageView" destination="8wH-qe-dgQ" id="Kvc-oe-g2o"/>
+                        <outlet property="operationControl" destination="KwV-1Z-Xje" id="sNA-rF-b26"/>
+                        <outlet property="redCheckBox" destination="Wpw-mn-ReH" id="NtW-Qo-FLj"/>
+                        <outlet property="valueTextFiled" destination="dLP-Xw-FBb" id="UjE-hc-WSI"/>
                     </connections>
                 </viewController>
                 <customObject id="rPt-NT-nkU" userLabel="First Responder" customClass="NSResponder" sceneMemberID="firstResponder"/>
