@@ -29,8 +29,12 @@ class ViewController: NSViewController {
         super.viewDidLoad()
     }
     
+    override func viewDidLayout() {
+        self.ikImageView.zoomImageToFit(nil)
+    }
 
     @IBAction func openImageAction(_ sender: Any) {
+        
         let dialog = NSOpenPanel();
         
         dialog.title                   = "Choose a image";
@@ -97,7 +101,75 @@ class ViewController: NSViewController {
         self.ikImageView.zoomImageToFit(nil)
     }
     
-    func processPixels() {
+    @IBAction func testerAction(_ sender: Any) {
+        //averageFilter()
+    }
+    
+    
+    
+    private func averageFilter() {
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        
+        let colorSpace       = CGColorSpaceCreateDeviceRGB()
+        let width            = cgImage.width
+        let height           = cgImage.height
+        let bytesPerPixel    = 4
+        let bitsPerComponent = 8
+        let bytesPerRow      = bytesPerPixel * width
+        let bitmapImfo       = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        
+        guard let context = CGContext.init(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapImfo) else {
+            print("Unable to create context")
+            return
+        }
+        
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        guard let buffer = context.data else {
+            print("Unable to get context data")
+            return
+        }
+        
+        let pixelBuffer = buffer.bindMemory(to: RGBA32.self, capacity: width*height)
+        
+        for row in 1 ..< Int(height)-1 {
+            for col in 1 ..< Int(width)-1 {
+                var sumR:CGFloat = 0
+                var sumG:CGFloat = 0
+                var sumB:CGFloat = 0
+                
+                for r in row-1...row+1 {
+                    for c in col-1...col+1 {
+                        let localRGB = originalBitmap.colorAt(x: c, y: r)!.cgColor.components!
+                        sumR += localRGB[0]
+                        sumG += localRGB[1]
+                        sumB += localRGB[2]
+                    }
+                }
+                
+                let avgR: CGFloat = sumR / 9 * 255
+                let avgG: CGFloat = sumG / 9 * 255
+                let avgB: CGFloat = sumB / 9 * 255
+                
+                let offset = row * width + col
+                pixelBuffer[offset] = RGBA32(red: avgR.RGB255(), green: avgG.RGB255(), blue: avgB.RGB255(), alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+    }
+    
+    private func processPixels() {
         guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
             print("Unable to get image from IKImageView")
             return
@@ -177,7 +249,7 @@ class ViewController: NSViewController {
         self.ikImageView.zoomImageToFit(nil)
     }
     
-    func dialogInfoOK(title: String, text: String) -> Bool {
+    private func dialogInfoOK(title: String, text: String) -> Bool {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = text
@@ -187,10 +259,13 @@ class ViewController: NSViewController {
     }
 }
 
-
 extension CGFloat {
     func int() -> Int {
         return Int(self)
+    }
+    
+    func RGB255 () -> UInt8 {
+        return self > 255 ? UInt8(255) : ( self < 0 ? UInt8(0) : UInt8(self))
     }
 }
 
@@ -203,6 +278,10 @@ extension NSTextField {
 extension Float {
     func RGB255 () -> UInt8 {
         return self > 255 ? UInt8(255) : ( self < 0 ? UInt8(0) : UInt8(self))
+    }
+    
+    func int() -> Int {
+        return Int(self)
     }
 }
 
