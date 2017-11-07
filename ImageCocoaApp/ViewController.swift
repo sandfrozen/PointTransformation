@@ -14,6 +14,12 @@ class ViewController: NSViewController {
     @IBOutlet weak var imagePathLabel: NSTextField!
     @IBOutlet weak var ikImageView: IKImageView!
     
+    var context: CGContext!
+    var pixelValues: Array<FloatColor>!
+    var pixelBuffer: UnsafeMutablePointer<RGBA32>!
+    var width: Int!
+    var height: Int!
+    
     @IBOutlet weak var rgbaControl: NSSegmentedControl!
     @IBOutlet weak var operationControl: NSSegmentedControl!
     @IBOutlet weak var valueTextFiled: NSTextField!
@@ -21,7 +27,53 @@ class ViewController: NSViewController {
     @IBOutlet weak var brightnessValueTextFiled: NSTextField!
     
     
-    var resultUrl: URL!
+    var resultUrl: URL! {
+        didSet {
+            guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+                print("Unable to get image from IKImageView")
+                return
+            }
+            
+            let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+            
+            let colorSpace       = CGColorSpaceCreateDeviceRGB()
+            width                = cgImage.width
+            height               = cgImage.height
+            let bytesPerPixel    = 4
+            let bitsPerComponent = 8
+            let bytesPerRow      = bytesPerPixel * width
+            let bitmapImfo       = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            
+            guard let contextGuarded = CGContext.init(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapImfo) else {
+                print("Unable to create context")
+                return
+            }
+            
+            context = contextGuarded
+            
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            
+            guard let buffer = context.data else {
+                print("Unable to get context data")
+                return
+            }
+            
+            pixelValues = []
+            pixelBuffer = buffer.bindMemory(to: RGBA32.self, capacity: width*height)
+            
+            for row in 0 ..< height {
+                for col in 0 ..< width {
+                    let offset = row * width + col
+                    let actualRGB = originalBitmap.colorAt(x: col, y: row)!.cgColor.components!
+                    let red =   (Float)(actualRGB[0] * 255)
+                    let green = (Float)(actualRGB[1] * 255)
+                    let blue =  (Float)(actualRGB[2] * 255)
+                    pixelValues.insert(FloatColor(red: red, green: green, blue: blue, alpha: 255), at: offset)
+                }
+            }
+            infoTestFiled.stringValue = "loaded"
+        }
+    }
     
     var operationsOnQueue: Int = 0
     
@@ -48,9 +100,9 @@ class ViewController: NSViewController {
         if dialog.runModal() == NSApplication.ModalResponse.OK {
             if let url = dialog.url {
                 self.imagePathLabel.stringValue = url.lastPathComponent
-                resultUrl = url
-                self.ikImageView.setImageWith(resultUrl)
+                self.ikImageView.setImageWith(url)
                 self.ikImageView.zoomImageToFit(nil)
+                resultUrl = url
             }
         } else {
             return
@@ -68,6 +120,26 @@ class ViewController: NSViewController {
         }
         self.ikImageView.setImageWith(resultUrl)
         self.ikImageView.zoomImageToFit(nil)
+        
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        
+        pixelValues = []
+        
+        for row in 0 ..< height {
+            for col in 0 ..< width {
+                let offset = row * width + col
+                let actualRGB = originalBitmap.colorAt(x: col, y: row)!.cgColor.components!
+                let red =   (Float)(actualRGB[0] * 255)
+                let green = (Float)(actualRGB[1] * 255)
+                let blue =  (Float)(actualRGB[2] * 255)
+                pixelValues.insert(FloatColor(red: red, green: green, blue: blue, alpha: 255), at: offset)
+            }
+        }
     }
     
     @IBAction func doOperationAction(_ sender: Any) {
@@ -78,27 +150,27 @@ class ViewController: NSViewController {
     }
     
     @IBAction func brightnessAction(_ sender: Any) {
-        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
-            print("Unable to get image from IKImageView")
-            return
-        }
-        let ciImage: CIImage = CIImage.init(cgImage: cgImage)
-        
-        let context = CIContext(options: nil)
-        let brightnessFilter = CIFilter(name: "CIColorControls")!
-        brightnessFilter.setValue(ciImage, forKey: "inputImage")
-        
-        var value = self.brightnessValueTextFiled.float()
-        if (sender as! NSButton).tag == 0 {
-            value *= -1
-        }
-        
-        brightnessFilter.setValue(value, forKey: "inputBrightness")
-        let outputImage = brightnessFilter.outputImage!
-        let cgimg = context.createCGImage(outputImage, from: outputImage.extent)
-        
-        ikImageView.setImage(cgimg, imageProperties: nil)
-        self.ikImageView.zoomImageToFit(nil)
+//        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+//            print("Unable to get image from IKImageView")
+//            return
+//        }
+//        let ciImage: CIImage = CIImage.init(cgImage: cgImage)
+//
+//        let context = CIContext(options: nil)
+//        let brightnessFilter = CIFilter(name: "CIColorControls")!
+//        brightnessFilter.setValue(ciImage, forKey: "inputImage")
+//
+//        var value = self.brightnessValueTextFiled.float()
+//        if (sender as! NSButton).tag == 0 {
+//            value *= -1
+//        }
+//
+//        brightnessFilter.setValue(value, forKey: "inputBrightness")
+//        let outputImage = brightnessFilter.outputImage!
+//        let cgimg = context.createCGImage(outputImage, from: outputImage.extent)
+//
+//        ikImageView.setImage(cgimg, imageProperties: nil)
+//        self.ikImageView.zoomImageToFit(nil)
     }
     
     @IBAction func testerAction(_ sender: Any) {
@@ -170,34 +242,6 @@ class ViewController: NSViewController {
     }
     
     private func processPixels() {
-        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
-            print("Unable to get image from IKImageView")
-            return
-        }
-        
-        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
-        
-        let colorSpace       = CGColorSpaceCreateDeviceRGB()
-        let width            = cgImage.width
-        let height           = cgImage.height
-        let bytesPerPixel    = 4
-        let bitsPerComponent = 8
-        let bytesPerRow      = bytesPerPixel * width
-        let bitmapImfo       = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        
-        guard let context = CGContext.init(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapImfo) else {
-            print("Unable to create context")
-            return
-        }
-        
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        guard let buffer = context.data else {
-            print("Unable to get context data")
-            return
-        }
-        
-        let pixelBuffer = buffer.bindMemory(to: RGBA32.self, capacity: width*height)
         let operation   = operationControl.selectedSegment
         let value       = self.valueTextFiled.float()
         
@@ -205,39 +249,33 @@ class ViewController: NSViewController {
         let changeGreen = rgbaControl.isSelected(forSegment: 1)
         let changeBlue  = rgbaControl.isSelected(forSegment: 2)
         
-        print("\(operationControl.label(forSegment: operation)!) \(value)")
+        infoTestFiled.stringValue = "\(operationControl.label(forSegment: operation)!) \(value)\(changeRed ? " R" : "")\(changeGreen ? " G" : "")\(changeBlue ? " B" : "")"
         
-        for row in 0 ..< Int(height) {
-            for col in 0 ..< Int(width) {
+        for row in 0 ..< height {
+            for col in 0 ..< width {
                 let offset = row * width + col
-                let actualRGB = originalBitmap.colorAt(x: col, y: row)!.cgColor.components!
-                //let actualHUE = originalBitmap.colorAt(x: col, y: row)!.brightnessComponent
-                var red =   (Float)(actualRGB[0] * 255)
-                var green = (Float)(actualRGB[1] * 255)
-                var blue =  (Float)(actualRGB[2] * 255)
-
+                
                 switch operation {
                 case 0:
-                    if changeRed    { red   += value }
-                    if changeGreen  { green += value }
-                    if changeBlue   { blue  += value }
+                    if changeRed    { pixelValues[offset].red   += value }
+                    if changeGreen  { pixelValues[offset].green += value }
+                    if changeBlue   { pixelValues[offset].blue  += value }
                 case 1:
-                    if changeRed    { red   -= value }
-                    if changeGreen  { green -= value }
-                    if changeBlue   { blue  -= value }
+                    if changeRed    { pixelValues[offset].red   -= value }
+                    if changeGreen  { pixelValues[offset].green -= value }
+                    if changeBlue   { pixelValues[offset].blue  -= value }
                 case 2:
-                    if changeRed    { red   *= value }
-                    if changeGreen  { green *= value }
-                    if changeBlue   { blue  *= value }
+                    if changeRed    { pixelValues[offset].red   *= value }
+                    if changeGreen  { pixelValues[offset].green *= value }
+                    if changeBlue   { pixelValues[offset].blue  *= value }
                 case 3:
-                    if changeRed    { red   /= value }
-                    if changeGreen  { green /= value }
-                    if changeBlue   { blue  /= value }
+                    if changeRed    { pixelValues[offset].red   /= value }
+                    if changeGreen  { pixelValues[offset].green /= value }
+                    if changeBlue   { pixelValues[offset].blue  /= value }
                 default:
                     break
                 }
-                
-                pixelBuffer[offset] = RGBA32(red: red.RGB255(), green: green.RGB255(),   blue: blue.RGB255(), alpha: 255)
+                pixelBuffer[offset] = RGBA32(red: pixelValues[offset].red.RGB255(), green: pixelValues[offset].green.RGB255(), blue: pixelValues[offset].blue.RGB255(), alpha: 255)
             }
         }
         
@@ -283,6 +321,15 @@ extension Float {
     func int() -> Int {
         return Int(self)
     }
+}
+
+struct FloatColor {
+    
+    var red: Float
+    var green: Float
+    var blue: Float
+    var alpha: Float
+    
 }
 
 struct RGBA32: Equatable {
