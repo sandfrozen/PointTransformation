@@ -14,68 +14,18 @@ class ViewController: NSViewController {
     @IBOutlet weak var imagePathLabel: NSTextField!
     @IBOutlet weak var ikImageView: IKImageView!
     
-    var context: CGContext!
-    var pixelValues: Array<FloatColor>!
-    var pixelBuffer: UnsafeMutablePointer<RGBA32>!
-    var width: Int!
-    var height: Int!
-    
     @IBOutlet weak var rgbaControl: NSSegmentedControl!
     @IBOutlet weak var operationControl: NSSegmentedControl!
     @IBOutlet weak var valueTextFiled: NSTextField!
     @IBOutlet weak var infoTestFiled: NSTextField!
     @IBOutlet weak var brightnessValueTextFiled: NSTextField!
     
-    
-    var resultUrl: URL! {
-        didSet {
-            guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
-                print("Unable to get image from IKImageView")
-                return
-            }
-            
-            let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
-            
-            let colorSpace       = CGColorSpaceCreateDeviceRGB()
-            width                = cgImage.width
-            height               = cgImage.height
-            let bytesPerPixel    = 4
-            let bitsPerComponent = 8
-            let bytesPerRow      = bytesPerPixel * width
-            let bitmapImfo       = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-            
-            guard let contextGuarded = CGContext.init(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapImfo) else {
-                print("Unable to create context")
-                return
-            }
-            
-            context = contextGuarded
-            
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-            
-            guard let buffer = context.data else {
-                print("Unable to get context data")
-                return
-            }
-            
-            pixelValues = []
-            pixelBuffer = buffer.bindMemory(to: RGBA32.self, capacity: width*height)
-            
-            for row in 0 ..< height {
-                for col in 0 ..< width {
-                    let offset = row * width + col
-                    let actualRGB = originalBitmap.colorAt(x: col, y: row)!.cgColor.components!
-                    let red =   (Float)(actualRGB[0] * 255)
-                    let green = (Float)(actualRGB[1] * 255)
-                    let blue =  (Float)(actualRGB[2] * 255)
-                    pixelValues.insert(FloatColor(red: red, green: green, blue: blue, alpha: 255), at: offset)
-                }
-            }
-            infoTestFiled.stringValue = "loaded"
-        }
-    }
-    
-    var operationsOnQueue: Int = 0
+    var context: CGContext!
+    var pixelValues: Array<FloatColor>!
+    var pixelBuffer: UnsafeMutablePointer<RGBA32>!
+    var width: Int!
+    var height: Int!
+    var resultUrl: URL!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -87,6 +37,12 @@ class ViewController: NSViewController {
 
     @IBAction func openImageAction(_ sender: Any) {
         
+        self.context = nil
+        self.pixelValues = nil
+        self.pixelBuffer = nil
+        self.width = nil
+        self.height = nil
+        
         let dialog = NSOpenPanel();
         
         dialog.title                   = "Choose a image";
@@ -95,14 +51,13 @@ class ViewController: NSViewController {
         dialog.canChooseDirectories    = true;
         dialog.canCreateDirectories    = true;
         dialog.allowsMultipleSelection = false;
-        dialog.allowedFileTypes        = ["png", "jpg"];
+        dialog.allowedFileTypes        = ["png", "jpg", "ppm"];
         
         if dialog.runModal() == NSApplication.ModalResponse.OK {
             if let url = dialog.url {
-                self.imagePathLabel.stringValue = url.lastPathComponent
-                self.ikImageView.setImageWith(url)
-                self.ikImageView.zoomImageToFit(nil)
+                self.imagePathLabel.stringValue = "Current image: \(url.lastPathComponent)"
                 resultUrl = url
+                self.resetImageAction(self)
             }
         } else {
             return
@@ -110,12 +65,13 @@ class ViewController: NSViewController {
         
         if resultUrl == nil {
             let _ = dialogInfoOK(title: "Error", text: "Problem occured while photo was reading.")
+            return
         }
     }
     
     @IBAction func resetImageAction(_ sender: Any) {
-        if ikImageView.image() == nil {
-            print("No loaded image to reset")
+        if resultUrl == nil {
+            print("No resultUrl image to reset")
             return
         }
         self.ikImageView.setImageWith(resultUrl)
@@ -128,7 +84,30 @@ class ViewController: NSViewController {
         
         let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
         
+        let colorSpace       = CGColorSpaceCreateDeviceRGB()
+        width                = cgImage.width
+        height               = cgImage.height
+        let bytesPerPixel    = 4
+        let bitsPerComponent = 8
+        let bytesPerRow      = bytesPerPixel * width
+        let bitmapImfo       = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        
+        guard let contextGuarded = CGContext.init(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapImfo) else {
+            print("Unable to create context")
+            return
+        }
+        
+        context = contextGuarded
+        
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        guard let buffer = context.data else {
+            print("Unable to get context data")
+            return
+        }
+        
         pixelValues = []
+        pixelBuffer = buffer.bindMemory(to: RGBA32.self, capacity: width*height)
         
         for row in 0 ..< height {
             for col in 0 ..< width {
@@ -140,46 +119,44 @@ class ViewController: NSViewController {
                 pixelValues.insert(FloatColor(red: red, green: green, blue: blue, alpha: 255), at: offset)
             }
         }
+        infoTestFiled.stringValue = "image loaded successful"
     }
     
     @IBAction func doOperationAction(_ sender: Any) {
-        operationsOnQueue += 1
-        self.infoTestFiled.stringValue = "Op on queue: \(operationsOnQueue)"
-        processPixels()
-        operationsOnQueue -= 1
+        if context != nil {
+            processPixels()
+        }
+        else {
+            self.infoTestFiled.stringValue = "No image loaded"
+        }
     }
     
     @IBAction func brightnessAction(_ sender: Any) {
-//        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
-//            print("Unable to get image from IKImageView")
-//            return
-//        }
-//        let ciImage: CIImage = CIImage.init(cgImage: cgImage)
-//
-//        let context = CIContext(options: nil)
-//        let brightnessFilter = CIFilter(name: "CIColorControls")!
-//        brightnessFilter.setValue(ciImage, forKey: "inputImage")
-//
-//        var value = self.brightnessValueTextFiled.float()
-//        if (sender as! NSButton).tag == 0 {
-//            value *= -1
-//        }
-//
-//        brightnessFilter.setValue(value, forKey: "inputBrightness")
-//        let outputImage = brightnessFilter.outputImage!
-//        let cgimg = context.createCGImage(outputImage, from: outputImage.extent)
-//
-//        ikImageView.setImage(cgimg, imageProperties: nil)
-//        self.ikImageView.zoomImageToFit(nil)
+        if context != nil {
+            var value = self.brightnessValueTextFiled.float()
+            
+            if (sender as! NSButton).tag == 0 {
+                value *= -1
+            }
+            
+            changeBrightness(value: value)
+        }
+        else {
+            self.infoTestFiled.stringValue = "No image loaded"
+        }
     }
     
-    @IBAction func testerAction(_ sender: Any) {
-        //averageFilter()
+    @IBAction func averageAction(_ sender: Any) {
+        if context != nil {
+            averageFilter()
+        }
+        else {
+            self.infoTestFiled.stringValue = "No image loaded"
+        }
+        
     }
     
-    
-    
-    private func averageFilter() {
+    @IBAction func medianAction(_ sender: Any) {
         guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
             print("Unable to get image from IKImageView")
             return
@@ -187,49 +164,29 @@ class ViewController: NSViewController {
         
         let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
         
-        let colorSpace       = CGColorSpaceCreateDeviceRGB()
-        let width            = cgImage.width
-        let height           = cgImage.height
-        let bytesPerPixel    = 4
-        let bitsPerComponent = 8
-        let bytesPerRow      = bytesPerPixel * width
-        let bitmapImfo       = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        
-        guard let context = CGContext.init(data: nil, width: width, height: height, bitsPerComponent: bitsPerComponent, bytesPerRow: bytesPerRow, space: colorSpace, bitmapInfo: bitmapImfo) else {
-            print("Unable to create context")
-            return
-        }
-        
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        guard let buffer = context.data else {
-            print("Unable to get context data")
-            return
-        }
-        
-        let pixelBuffer = buffer.bindMemory(to: RGBA32.self, capacity: width*height)
-        
         for row in 1 ..< Int(height)-1 {
             for col in 1 ..< Int(width)-1 {
-                var sumR:CGFloat = 0
-                var sumG:CGFloat = 0
-                var sumB:CGFloat = 0
+                var tabR: [Float] = []
+                var tabG: [Float] = []
+                var tabB: [Float] = []
                 
                 for r in row-1...row+1 {
                     for c in col-1...col+1 {
                         let localRGB = originalBitmap.colorAt(x: c, y: r)!.cgColor.components!
-                        sumR += localRGB[0]
-                        sumG += localRGB[1]
-                        sumB += localRGB[2]
+                        tabR.append((Float)(localRGB[0]))
+                        tabG.append((Float)(localRGB[1]))
+                        tabB.append((Float)(localRGB[2]))
                     }
                 }
                 
-                let avgR: CGFloat = sumR / 9 * 255
-                let avgG: CGFloat = sumG / 9 * 255
-                let avgB: CGFloat = sumB / 9 * 255
+                
+                let medianR: Float = medianValue(tab: tabR) * 255
+                let medianG: Float = medianValue(tab: tabG) * 255
+                let medianB: Float = medianValue(tab: tabB) * 255
                 
                 let offset = row * width + col
-                pixelBuffer[offset] = RGBA32(red: avgR.RGB255(), green: avgG.RGB255(), blue: avgB.RGB255(), alpha: 255)
+                pixelBuffer[offset] = RGBA32(red: medianR.RGB255(), green: medianG.RGB255(), blue: medianB.RGB255(), alpha: 255)
+                pixelValues[offset] = FloatColor(red: medianR, green: medianG, blue: medianB, alpha: 255)
             }
         }
         
@@ -239,6 +196,278 @@ class ViewController: NSViewController {
         }
         ikImageView.setImage(resultCGImage, imageProperties: nil)
         self.ikImageView.zoomImageToFit(nil)
+        self.infoTestFiled.stringValue = "Added average filter"
+    }
+    
+    @IBAction func edgeDetectingAction(_ sender: Any) {
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        let fv: [Float] = [1, 2, 1, 0, 0, 0, -1, -2, -1]
+        //let fv: [Float] = [1, 0, -1, 2, 0, -2, 1, 0, -1]
+
+        
+        for row in 1 ..< Int(height)-1 {
+            for col in 1 ..< Int(width)-1 {
+                
+                var sumR:Float = 0
+                var sumG:Float = 0
+                var sumB:Float = 0
+                var index = 0
+                
+                for r in row-1...row+1 {
+                    for c in col-1...col+1 {
+                        let localRGB = originalBitmap.colorAt(x: c, y: r)!.cgColor.components!
+                        sumR += (Float)(localRGB[0]) * fv[index]
+                        sumG += (Float)(localRGB[1]) * fv[index]
+                        sumB += (Float)(localRGB[2]) * fv[index]
+                        index += 1
+                    }
+                }
+                
+                let avgR: Float = sumR * 255
+                let avgG: Float = sumG * 255
+                let avgB: Float = sumB * 255
+                
+                let offset = row * width + col
+                pixelBuffer[offset] = RGBA32(red: avgR.RGB255(), green: avgG.RGB255(), blue: avgB.RGB255(), alpha: 255)
+                pixelValues[offset] = FloatColor(red: avgR, green: avgG, blue: avgB, alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+        self.infoTestFiled.stringValue = "Added Gauss blur filter"
+    }
+    
+    @IBAction func highPassAction(_ sender: Any) {
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        let fv: [Float] = [-1, -1, -1, -1, 9, -1, -1, -1, -1]
+        //let fv: [Float] = [0, -1, 0, -1, 5, -1, 0, -1, 0]
+        
+        for row in 1 ..< Int(height)-1 {
+            for col in 1 ..< Int(width)-1 {
+                
+                var sumR:Float = 0
+                var sumG:Float = 0
+                var sumB:Float = 0
+                var index = 0
+                
+                for r in row-1...row+1 {
+                    for c in col-1...col+1 {
+                        let localRGB = originalBitmap.colorAt(x: c, y: r)!.cgColor.components!
+                        sumR += (Float)(localRGB[0]) * fv[index]
+                        sumG += (Float)(localRGB[1]) * fv[index]
+                        sumB += (Float)(localRGB[2]) * fv[index]
+                        index += 1
+                    }
+                }
+                
+                let avgR: Float = sumR * 255
+                let avgG: Float = sumG * 255
+                let avgB: Float = sumB * 255
+                
+                let offset = row * width + col
+                pixelBuffer[offset] = RGBA32(red: avgR.RGB255(), green: avgG.RGB255(), blue: avgB.RGB255(), alpha: 255)
+                pixelValues[offset] = FloatColor(red: avgR, green: avgG, blue: avgB, alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+        self.infoTestFiled.stringValue = "Added H-pass filter"
+    }
+    
+    @IBAction func gaussBlurAction(_ sender: Any) {
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        let fv: [Float] = [1, 2, 1, 2, 4, 2, 1, 2, 1]
+        
+        for row in 1 ..< Int(height)-1 {
+            for col in 1 ..< Int(width)-1 {
+                
+                var sumR:Float = 0
+                var sumG:Float = 0
+                var sumB:Float = 0
+                var index = 0
+                
+                for r in row-1...row+1 {
+                    for c in col-1...col+1 {
+                        let localRGB = originalBitmap.colorAt(x: c, y: r)!.cgColor.components!
+                        sumR += (Float)(localRGB[0]) * fv[index]
+                        sumG += (Float)(localRGB[1]) * fv[index]
+                        sumB += (Float)(localRGB[2]) * fv[index]
+                        index += 1
+                    }
+                }
+                
+                let avgR: Float = sumR * 255 / 16
+                let avgG: Float = sumG * 255 / 16
+                let avgB: Float = sumB * 255 / 16
+                
+                let offset = row * width + col
+                pixelBuffer[offset] = RGBA32(red: avgR.RGB255(), green: avgG.RGB255(), blue: avgB.RGB255(), alpha: 255)
+                pixelValues[offset] = FloatColor(red: avgR, green: avgG, blue: avgB, alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+        self.infoTestFiled.stringValue = "Added Gauss blur filter"
+    }
+    @IBOutlet weak var redText: NSTextField!
+    @IBOutlet weak var greenText: NSTextField!
+    @IBOutlet weak var blueText: NSTextField!
+    
+    @IBAction func autoGrayAction(_ sender: Any) {
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        
+        for row in 0 ..< height {
+            for col in 0 ..< width {
+                
+                let localRGB = originalBitmap.colorAt(x: col, y: row)!.cgColor.components!
+                let gray = ((Float)(localRGB[0] + localRGB[1] + localRGB[2]) / 3 ) * 255
+                
+                let offset = row * width + col
+                pixelBuffer[offset] = RGBA32(red: gray.RGB255(), green: gray.RGB255(), blue: gray.RGB255(), alpha: 255)
+                pixelValues[offset] = FloatColor(red: gray, green: gray, blue: gray, alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+        self.infoTestFiled.stringValue = "Gray auto succeed"
+    }
+    
+    @IBAction func greyAction(_ sender: Any) {
+        infoTestFiled.stringValue = "Grey changed"
+        
+        let rRatio = redText.float()
+        let gRatio = greenText.float()
+        let bRatio = blueText.float()
+        
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        
+        for row in 0 ..< height {
+            for col in 0 ..< width {
+                
+                let localRGB = originalBitmap.colorAt(x: col, y: row)!.cgColor.components!
+                let gray = (rRatio * (Float)(localRGB[0]) + gRatio + (Float)(localRGB[1]) + bRatio * (Float)(localRGB[2])) * 255
+                
+                let offset = row * width + col
+                pixelBuffer[offset] = RGBA32(red: gray.RGB255(), green: gray.RGB255(), blue: gray.RGB255(), alpha: 255)
+                pixelValues[offset] = FloatColor(red: gray, green: gray, blue: gray, alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+        self.infoTestFiled.stringValue = "Gray changed"
+    }
+    
+    private func changeBrightness(value: Float) {
+        infoTestFiled.stringValue = "Brightness: \(value)"
+        
+        for row in 0 ..< height {
+            for col in 0 ..< width {
+                let offset = row * width + col
+                pixelValues[offset].red   += value
+                pixelValues[offset].green += value
+                pixelValues[offset].blue  += value
+                pixelBuffer[offset] = RGBA32(red: pixelValues[offset].red.RGB255(), green: pixelValues[offset].green.RGB255(), blue: pixelValues[offset].blue.RGB255(), alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+    }
+    
+    private func averageFilter() {
+        guard let cgImage: CGImage = ikImageView.image()?.takeUnretainedValue() else {
+            print("Unable to get image from IKImageView")
+            return
+        }
+        
+        let originalBitmap = NSBitmapImageRep.init(cgImage: cgImage)
+        
+        for row in 1 ..< Int(height)-1 {
+            for col in 1 ..< Int(width)-1 {
+                var sumR:Float = 0
+                var sumG:Float = 0
+                var sumB:Float = 0
+                
+                for r in row-1...row+1 {
+                    for c in col-1...col+1 {
+                        let localRGB = originalBitmap.colorAt(x: c, y: r)!.cgColor.components!
+                        sumR += (Float)(localRGB[0])
+                        sumG += (Float)(localRGB[1])
+                        sumB += (Float)(localRGB[2])
+                    }
+                }
+                
+                let avgR: Float = sumR / 9 * 255
+                let avgG: Float = sumG / 9 * 255
+                let avgB: Float = sumB / 9 * 255
+                
+                let offset = row * width + col
+                pixelBuffer[offset] = RGBA32(red: avgR.RGB255(), green: avgG.RGB255(), blue: avgB.RGB255(), alpha: 255)
+                pixelValues[offset] = FloatColor(red: avgR, green: avgG, blue: avgB, alpha: 255)
+            }
+        }
+        
+        guard let resultCGImage = context.makeImage() else {
+            print("Unable to make image from processed context")
+            return
+        }
+        ikImageView.setImage(resultCGImage, imageProperties: nil)
+        self.ikImageView.zoomImageToFit(nil)
+        self.infoTestFiled.stringValue = "Added average filter"
     }
     
     private func processPixels() {
@@ -294,6 +523,11 @@ class ViewController: NSViewController {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func medianValue(tab: [Float]) -> Float {
+        let median = tab.sorted(by: <)
+        return median[4]
     }
 }
 
